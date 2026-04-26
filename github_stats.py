@@ -176,9 +176,7 @@ class Queries(object):
                         "Please generate a new token at https://github.com/settings/tokens"
                     )
                 if r_async.status == 202:
-                    # print(f"{path} returned 202. Retrying...")
-                    print(f"A path returned 202. Retrying...")
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(5)
                     continue
 
                 result = await r_async.json()
@@ -190,9 +188,24 @@ class Queries(object):
                 print(f"REST query failed for path '{path}': {e}")
                 # Return empty dict to allow graceful degradation
                 return dict()
-        # print(f"There were too many 202s. Data for {path} will be incomplete.")
-        print("There were too many 202s. Data for this repository will be incomplete.")
         return dict()
+
+    async def trigger_stats(self, path: str) -> None:
+        """
+        Fire a single request to trigger async stat computation on GitHub's side.
+        Does not retry; intended as a pre-warm call.
+        """
+        if path.startswith("/"):
+            path = path[1:]
+        headers = {"Authorization": f"token {self.access_token}"}
+        try:
+            async with self.semaphore:
+                await self.session.get(
+                    f"https://api.github.com/{path}",
+                    headers=headers,
+                )
+        except Exception:
+            pass
 
     @staticmethod
     def repos_overview(
@@ -594,7 +607,15 @@ Languages:
                 return self._lines_changed
         
         repos = await self.repos
-        
+
+        # Pre-warm: trigger GitHub to compute stats for all repos in parallel,
+        # then wait for computation to finish before fetching results.
+        await asyncio.gather(
+            *[self.queries.trigger_stats(f"/repos/{repo}/stats/contributors") for repo in repos],
+            return_exceptions=True,
+        )
+        await asyncio.sleep(30)
+
         async def fetch_repo_stats(repo: str) -> Tuple[int, int]:
             """
             Fetch contributor stats for a single repo.
