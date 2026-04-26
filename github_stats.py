@@ -124,9 +124,24 @@ class Queries(object):
                     headers=headers,
                     json={"query": generated_query},
                 )
+            if r_async.status == 401:
+                raise RuntimeError(
+                    "GitHub API returned 401 Unauthorized. "
+                    "Your ACCESS_TOKEN secret is missing, expired, or lacks the required scopes. "
+                    "Please generate a new token at https://github.com/settings/tokens"
+                )
+            if r_async.status == 403:
+                raise RuntimeError(
+                    "GitHub API returned 403 Forbidden. "
+                    "Your token may lack required permissions or you have hit a rate limit."
+                )
             result = await r_async.json()
             if result is not None:
+                if "errors" in result:
+                    print(f"GraphQL errors: {result['errors']}")
                 return result
+        except RuntimeError:
+            raise
         except Exception as e:
             print(f"GraphQL query failed for user {self.username}: {e}")
         return dict()
@@ -154,6 +169,12 @@ class Queries(object):
                         headers=headers,
                         params=tuple(params.items()),
                     )
+                if r_async.status == 401:
+                    raise RuntimeError(
+                        "GitHub API returned 401 Unauthorized. "
+                        "Your ACCESS_TOKEN secret is missing, expired, or lacks the required scopes. "
+                        "Please generate a new token at https://github.com/settings/tokens"
+                    )
                 if r_async.status == 202:
                     # print(f"{path} returned 202. Retrying...")
                     print(f"A path returned 202. Retrying...")
@@ -163,6 +184,8 @@ class Queries(object):
                 result = await r_async.json()
                 if result is not None:
                     return result
+            except RuntimeError:
+                raise
             except Exception as e:
                 print(f"REST query failed for path '{path}': {e}")
                 # Return empty dict to allow graceful degradation
